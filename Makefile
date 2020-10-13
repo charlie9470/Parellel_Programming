@@ -10,11 +10,19 @@ all: $(TARGETS)
 .PHONY: clean
 clean:
 	rm -f $(TARGETS)
+
+testcase = 03
+output = ans.txt
+NumofMach = 2
+Numofthreads = 5
+Num = 21
 get_test:
-	od -tfF testcases/03.in
+	od -tfF testcases/$(testcase).in
 get_ans:
-	od -tfF testcases/03.out
+	od -tfF testcases/$(testcase).out
+compare:
+	diff testcases/$(testcase).out $(output)
 run:
-	srun -N 1 -n 6 ./hw1 21 testcases/03.in ans.txt
+	srun -N $(NumofMach) -n $(Numofthreads) ./hw1 $(Num) testcases/$(testcase).in $(output)
 recover:
 	cp ../../share/hw1/testcases/03.in testcases
