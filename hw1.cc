@@ -41,91 +41,112 @@ int main(int argc, char** argv) {
 //	int index_E = 0;//points to the index of the sorted pair ex. (5,6) is to be sorted index_E = 5;
 
 	bool done = false;//if true return
-	float * ans = (float*)malloc(sizeof(float)*num);
+	float *ans;
+	ans = (float*)malloc(sizeof(float) * num);
 	printf("Num: %d\n",num);
-	int test_int = 0;
 
 	MPI_Init(&argc,&argv);
 	int rank, size;
 	int round = 0;
 	int index;
+	int change = 0;
+	int t_change;
+	float swapped[2];
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 	MPI_File f;
-	MPI_File_open(MPI_COMM_WORLD, argv[2], MPI_MODE_RDONLY, MPI_INFO_NULL, &f);/*
-	MPI_File_read_all_begin(f, ans, num, MPI_FLOAT);
+	MPI_File_open(MPI_COMM_WORLD, argv[2], MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
+	MPI_File_read_all(f, ans, num, MPI_FLOAT, MPI_STATUS_IGNORE);
+	MPI_File_close(&f);
 	if(rank == 0){
-		printf("list:");
+		printf("MPI_rank is 0\n");
+//		MPI_File_read(f, ans, num, MPI_FLOAT, MPI_STATUS_IGNORE);
+/*		printf("list:");
+		printf("----------------------------------\n");
 		for(int i = 0;i<num;i++){
 			printf("%f ",ans[i]);
 		}
 		printf("\n");
-	}
-	printf("TESTINT is %d\n",test_int+=rank);*/
+		printf("----------------------------------\n");
+*/	}
+	MPI_Barrier(MPI_COMM_WORLD);
 	//case A:size < max(num_OP,num_OE)
 	//case B:size = max(num_OP,num_OE)
 	//case C:size > min(num_OP,num_OE) //meaningless
 	while(1){
-		if(rank == 0&& round == 0){
-			printf("list before odd/even pairs sorted:");
+		change = 0;
+		t_change = 0;
+		if(rank == 0){
+			printf("list before odd/even pairs sorted:\n");
+			printf("----------------------------------\n");
 			for(int i = 0;i<num;i++){
 				printf("%f ",ans[i]);
 			}
 			printf("\n");
+			printf("----------------------------------\n");
 		}
 		MPI_Barrier(MPI_COMM_WORLD);
 //		printf("Rank %d began round %d\n", rank, round);
 //		if(rank == 0) printf("ROUND %d, OE:%d\n",round,so_O);
-		if(so_O){//sort odd pairs
-			//0 2 4 6 8 10
-			index = 2 * round * size + 2 * rank;
-			if(index+1>numP) {
-				round = 0;
-				continue;
+		index = 0;
+		//Sort Odd Pairs
+		while(index < num){
+//			printf("rank %d should get (%f)\n", rank, *(ans + index));
+			MPI_Scatter(ans + index, 2, MPI_FLOAT, swapped, 2, MPI_FLOAT, 0, MPI_COMM_WORLD);
+			printf("index is %d, rank %d has: (%f,%f)\n", index, rank,swapped[0],swapped[1]);
+			if(index + 2 * rank + 1 <= numP){
+				if(swapped[0]>swapped[1]){
+					printf("swapped occured in rank %d\n",rank);
+					swap(&swapped[0], &swapped[1]);
+					change = 1;
+				}
 			}
-			printf("rank %d gets (%f,%f) from (%d,%d)\n",rank,ans[index],ans[index+1],index,index+1);
-			if(ans[index]>ans[index+1]){
-				swap(&ans[index],&ans[index+1]);
-				printf("Swap!\nrank %d swapped(%d,%d)\n",rank,index,index+1);
-				done = false;
-			}
-			if(index==numP||index==numP-1){
-				so_O = false;
-				printf("Start sorting even pairs\n");
-				round = 0;
-				continue;
-			}
+			MPI_Gather(swapped, 2, MPI_FLOAT, ans + index, 2, MPI_FLOAT, 0, MPI_COMM_WORLD);
+			MPI_Reduce(&change, &t_change, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+			index += 2 * size;
 		}
-		else{//sort even pairs
-			//1 3 5 7 9 11
-			index = 2 * round * size + 2 * rank + 1;
-			if(index+1>numP) {
-				round = 0;
-				continue;
+		//Sort Even Pairs
+		if(rank == 0){
+			change = t_change;
+			printf("list after odd pairs sorted:\n");
+			printf("----------------------------------\n");
+			for(int i = 0;i<num;i++){
+				printf("%f ",ans[i]);
 			}
-			printf("rank %d gets (%f,%f) from (%d,%d)\n",rank,ans[index],ans[index+1],index,index+1);
-			if(ans[index]>ans[index+1]){
-				swap(&ans[index],&ans[index+1]);
-				printf("Swap!\nrank %d swapped(%d,%d)\n",rank,index,index+1);
-				done = false;
-			}
-			if(index==numP||index==numP-1){
-				if(done) break;
-				so_O = true;
-				done = true;
-				printf("Start sorting odd pairs\n");
-				round = 0;
-				continue;
-			}
+			printf("\n");
+			printf("----------------------------------\n");
 		}
-		round++;
+		index = 1;
+		while(index < num){
+			MPI_Scatter(ans + index, 2, MPI_FLOAT, swapped, 2, MPI_FLOAT, 0, MPI_COMM_WORLD);
+			if(index + 2 * rank + 1 <= numP){
+				if(swapped[0]>swapped[1]){
+					printf("swapped occured in rank %d\n",rank);
+					swap(&swapped[0], &swapped[1]);
+					change = 1;
+				}
+			}
+			MPI_Gather(swapped, 2, MPI_FLOAT, ans + index, 2, MPI_FLOAT, 0, MPI_COMM_WORLD);
+			MPI_Reduce(&change, &t_change, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+			index += 2 * size;
+		}
+		if(rank == 0){
+			printf("list after even pairs sorted:\n");
+			printf("----------------------------------\n");
+			for(int i = 0;i<num;i++){
+				printf("%f ",ans[i]);
+			}
+			printf("\n");
+			printf("----------------------------------\n");
+		}
+		MPI_Bcast(&t_change, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		if(t_change == 0) break;
 	}
-	MPI_File_sync(f);
+	MPI_File_close(&f);
 	MPI_File out_file;
 	MPI_File_open(MPI_COMM_WORLD, argv[2], MPI_MODE_WRONLY, MPI_INFO_NULL, &out_file);
 	MPI_File_write_all(out_file, &ans, num, MPI_FLOAT, MPI_STATUS_IGNORE);
-	MPI_File_close(&f);
 	MPI_File_close(&out_file);
-	MPI_Finalize();*/
+	MPI_Finalize();
 	return 0;
  }

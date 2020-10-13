@@ -11,6 +11,10 @@ all: $(TARGETS)
 clean:
 	rm -f $(TARGETS)
 get_test:
-	od -tfF ../testcases/03.in
+	od -tfF testcases/03.in
+get_ans:
+	od -tfF testcases/03.out
 run:
-	srun -N 1 -n 6 ./hw1 21 ../testcases/03.in ans.txt
+	srun -N 1 -n 6 ./hw1 21 testcases/03.in ans.txt
+recover:
+	cp ../../share/hw1/testcases/03.in testcases
