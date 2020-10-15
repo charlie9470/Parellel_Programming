@@ -13,16 +13,18 @@ clean:
 
 testcase = 03
 output = ans.txt
-NumofMach = 2
-Numofthreads = 5
+NumofMach = 4
+Numofthreads = 28
 Num = 21
 get_test:
 	od -tfF testcases/$(testcase).in
 get_ans:
 	od -tfF testcases/$(testcase).out
+get_My:
+	od -tfF $(output)
 compare:
 	diff testcases/$(testcase).out $(output)
 run:
 	srun -N $(NumofMach) -n $(Numofthreads) ./hw1 $(Num) testcases/$(testcase).in $(output)
 recover:
-	cp ../../share/hw1/testcases/03.in testcases
+	cp ../../share/hw1/testcases/$(testcase).in testcases
