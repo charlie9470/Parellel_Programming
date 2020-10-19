@@ -27,20 +27,6 @@ int main(int argc, char** argv) {
 	int num;//size of testcase
 	sscanf(argv[1], "%d", &num);
 	int numP = num-1;//size of pairs should be num_OP + num_OE
-	int num_OP = floor(num/2);//num of odd pairs
-	int num_OE = floor((num-1)/2);//num of even pairs
-
-	int num_SO = 0;//num of sorted pairs in the round
-	int num_SE = 0;//num of sorted pairs in the round
-
-	/*
-	bool E_O = false;//epoch of odd
-	bool E_E = false;//epoch of even
-	*/
-	bool so_O = 1;//0 or 1. 0 means sorting even pairs, 1 means sorting odd pairs.
-//	int index_O = 0;//points to the index of the sorted pair ex. (4,5) is to be sorted index_O = 4;
-//	int index_E = 0;//points to the index of the sorted pair ex. (5,6) is to be sorted index_E = 5;
-
 	bool done = false;//if true return
 	float *ans;
 	ans = (float*)malloc(sizeof(float) * num);
@@ -63,121 +49,146 @@ int main(int argc, char** argv) {
 	//case A:size < max(num_OP,num_OE)
 	//case B:size = max(num_OP,num_OE)
 	//case C:size > min(num_OP,num_OE) //meaningless
+	//
+	//
+	int *send_cnt;
+	int *displs;
+	int index_no_work = 0;
+	if(rank == 0){
+		send_cnt = (int*)malloc(sizeof(int) * size);
+		displs = (int*)malloc(sizeof(int) * size);
+		int dist_num = num;
+		for(int i = 0;i < size;i++){
+			send_cnt[i] = 0;
+			displs[i] = 0;
+		}
+		for(int i = 0;i < size && dist_num != 0;i++){
+			send_cnt[i]=2;
+			dist_num-=2;
+			if(dist_num==1){
+				if(i+1 < size) send_cnt[i+1] = 1;
+				else send_cnt[i]++;
+				dist_num--;
+				index_no_work = i+2;
+			}
+			else index_no_work = i+1;
+		}
+//		printf("Index_no_work: %d\n", index_no_work);
+		for(int i = 0;dist_num>0;i++){
+			if(i == size) i = 0;
+			send_cnt[i]++;
+			dist_num--;
+		}
+		displs[0] = 0;
+		for(int i = 1;i < size;i++){
+			displs[i] = displs[i-1] + send_cnt[i-1];
+		}
+		if(DEBUG_MODE){
+		for(int i = 0;i<size;i++){
+			printf("%d,", send_cnt[i]);
+		}
+		printf("\n");
+		for(int i = 0;i<size;i++){
+			printf("%d,", displs[i]);
+		}
+		printf("\n");
+		}
+	}
+	int recv_num = 0;
+	int dist_num = num;
+	if(num > 2 * size){
+		recv_num = 2;
+		dist_num -= 2*size;
+		while(dist_num > size){
+			dist_num -= size;
+			recv_num++;
+		}
+		if(rank < dist_num) recv_num++;
+	}
+	else{
+		if(rank < dist_num/2){
+			recv_num = 2;
+		}
+		if(dist_num%2){
+			if(rank == dist_num/2) recv_num = 1;
+		}
+	}
+	swapped = (float*)malloc(sizeof(float) * recv_num);
+	if(DEBUG_MODE) printf("Rank %d received %d\n", rank, recv_num);
+	MPI_Scatterv(ans, send_cnt, displs, MPI_FLOAT, swapped, recv_num, MPI_FLOAT, 0, MPI_COMM_WORLD);
+	//
+	//
 	while(1){
 		change = 0;
 		t_change = 0;
-		//Sort Odd Pairs
-		int *send_cnt;
-		int *displs;
-		if(rank == 0){
-			send_cnt = (int*)malloc(sizeof(int) * size);
-			displs = (int*)malloc(sizeof(int) * size);
-			int dist_num = num;
-			int spread = 2 * (num / (2 * size));
-			for(int i = 0;i < size;i++){
-				send_cnt[i] = spread;
-			}
-			dist_num -= spread * size;
-			for(int i = 0;dist_num >= 2;i++){
-				send_cnt[i] += 2;
-				dist_num -= 2;
-			}
-			displs[0] = 0;
-			for(int i = 1;i < size;i++){
-				displs[i] = displs[i-1] + send_cnt[i-1];
-			}
-			if(DEBUG_MODE){
-			for(int i = 0;i<size;i++){
-				printf("%d,", send_cnt[i]);
-			}
-			printf("\n");
-			for(int i = 0;i<size;i++){
-				printf("%d,", displs[i]);
-			}
-			printf("\n");
-			}
-		}
-		int recv_num = 2 * (num / (2 * size));
-		if(2 * rank + 1 < num % (2 * size)) recv_num+=2;
-		swapped = (float*)malloc(sizeof(float) * recv_num);
-		MPI_Scatterv(ans, send_cnt, displs, MPI_FLOAT, swapped, recv_num, MPI_FLOAT, 0, MPI_COMM_WORLD);
-		for(int i = 0;i<recv_num;i+=2){
+		//Odd-Even Sort in different processes
+		for(int i = 0;i<recv_num-1;i+=2){
 			if(swapped[i] > swapped[i+1]){
 				swap(&swapped[i],&swapped[i+1]);
 				change++;
 				//printf("Swapped!!!\n");
 			}
 		}
-		MPI_Gatherv(swapped, recv_num, MPI_FLOAT, ans, send_cnt, displs, MPI_FLOAT, 0, MPI_COMM_WORLD);
-		if(DEBUG_MODE){
-		if(rank == 0){
-			printf("ANS after odd sort:----------------------------------\n");
-			for(int i = 0;i<num;i++){
-				printf("%f ",ans[i]);
-			}
-			printf("\n");
-			printf("----------------------------------\n");
-		}
-		}
-		//Sort Even Pairs
-		if(rank == 0){
-			send_cnt = (int*)malloc(sizeof(int) * size);
-			displs = (int*)malloc(sizeof(int) * size);
-			int dist_num/*num distributing to send_cnt*/ = num - 1;
-			int spread = 2 * ((num-1) / (2 * size));
-			for(int i = 0;i < size;i++){
-				send_cnt[i] = spread;
-			}
-			dist_num -= spread * size;
-			for(int i = 0;dist_num >= 2;i++){
-				send_cnt[i] += 2;
-				dist_num -= 2;
-			}
-			displs[0] = 1;
-			
-			for(int i = 1;i < size;i++){
-				displs[i] = displs[i-1] + send_cnt[i-1];
-			}
-			if(DEBUG_MODE){
-			for(int i = 0;i<size;i++){
-				printf("%d,", send_cnt[i]);
-			}
-			printf("\n");
-			for(int i = 0;i<size;i++){
-				printf("%d,", displs[i]);
-			}
-			printf("\n");
-			}
-		}
-		recv_num = 2 * ((num-1) / (2 * size));
-		if(2 * rank + 1 < (num - 1) % (2 * size)) recv_num+=2;
-//		MPI_Barrier(MPI_COMM_WORLD);
-		//printf("rank %d received %d nums\n", rank, recv_num);
-		swapped = (float*)malloc(sizeof(float) * recv_num);
-		MPI_Scatterv(ans, send_cnt, displs, MPI_FLOAT, swapped, recv_num, MPI_FLOAT, 0, MPI_COMM_WORLD);
-		for(int i = 0;i<recv_num;i+=2){
+		for(int i = 1;i<recv_num-1;i+=2){
 			if(swapped[i] > swapped[i+1]){
 				swap(&swapped[i],&swapped[i+1]);
 				change++;
 				//printf("Swapped!!!\n");
 			}
 		}
-		MPI_Gatherv(swapped, recv_num, MPI_FLOAT, ans, send_cnt, displs, MPI_FLOAT, 0, MPI_COMM_WORLD);
-
+//		if(change!=0) continue;
+//		float *pass_next = (float*)malloc(sizeof(float));//Pass the last element of each process to the next process
+//		float *recv_prev = (float*)malloc(sizeof(float));//Element received from prev process
+		float pass_next[1];
+		float recv_prev[1];
+		MPI_Request send_req, recv_req;
+		MPI_Status status;
+		pass_next[0] = swapped[recv_num-1];
+		MPI_Bcast(&index_no_work, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		if(rank < index_no_work - 1){
+			MPI_Isend(&pass_next, 1, MPI_FLOAT, rank+1, 0, MPI_COMM_WORLD, &send_req);
+//			MPI_Wait(&send_req, &status);
+		}
+		if(rank != 0 && rank < index_no_work){
+			MPI_Irecv(&recv_prev, 1, MPI_FLOAT, rank-1, 0, MPI_COMM_WORLD, &recv_req);
+			MPI_Wait(&recv_req, &status);
+			if(recv_prev[0] > swapped[0]){
+//				printf("Received %f compare with %f\n",recv_prev[0],swapped[0]);
+//				printf("Should swap\n");
+				swap(&recv_prev[0], &swapped[0]);
+//				printf("rank %d, recv_prev[0] is %f\n", rank, recv_prev[0]);
+//				printf("rank %d, swapped[0] is %f\n", rank, swapped[0]);
+				change++;
+			}
+			MPI_Isend(&recv_prev, 1, MPI_FLOAT, rank-1, 0, MPI_COMM_WORLD, &send_req);
+			MPI_Wait(&send_req, &status);
+		}
+		if(rank < index_no_work - 1){
+			MPI_Irecv(&pass_next, 1, MPI_FLOAT, rank+1, 0, MPI_COMM_WORLD, &recv_req);
+			MPI_Wait(&recv_req, &status);
+			swap(&pass_next[0],&swapped[recv_num-1]);
+//			printf("rank %d, pass_next[0] is %f\n", rank, pass_next[0]);
+//			printf("rank %d, swapped[%d] is %f\n",rank, recv_num-1, swapped[recv_num-1]);
+		}
 		MPI_Allreduce(&change, &t_change, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-		if(DEBUG_MODE){
-		if(rank == 0){
-			printf("ANS after even sort:----------------------------------\n");
-			for(int i = 0;i<num;i++){
-				printf("%f ",ans[i]);
+		MPI_Barrier(MPI_COMM_WORLD);
+//		printf("one round complete\n");
+		MPI_Barrier(MPI_COMM_WORLD);
+		if(t_change == 0) {
+			MPI_Gatherv(swapped, recv_num, MPI_FLOAT, ans, send_cnt, displs, MPI_FLOAT, 0, MPI_COMM_WORLD);
+			if(DEBUG_MODE){
+				if(rank == 0){
+					printf("ANS:----------------------------------\n");
+					for(int i = 0;i<num;i++){
+						printf("%f ",ans[i]);
+					}
+					printf("\n");
+					printf("----------------------------------\n");
+				}
 			}
-			printf("\n");
-			printf("----------------------------------\n");
+			break;
 		}
-		}
-		if(t_change == 0) break;
 	}
-//	MPI_Barrier(MPI_COMM_WORLD);
 //	//printf("Sorted and stored in ans\n");
 	MPI_File_close(&f);
 	MPI_File out_file;
@@ -191,7 +202,7 @@ int main(int argc, char** argv) {
 		MPI_File_write(out_file, ans, num, MPI_FLOAT, MPI_STATUS_IGNORE);
 	}
 	MPI_File_close(&out_file);
-	
+	if(DEBUG_MODE){
 	if(rank == 0){
 		printf("ANS:----------------------------------\n");
 		for(int i = 0;i<num;i++){
@@ -200,7 +211,7 @@ int main(int argc, char** argv) {
 		}
 		printf("----------------------------------\n");
 	}
-	
+	}
 	MPI_Finalize();
 	}
 	else{

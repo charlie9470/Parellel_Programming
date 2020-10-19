@@ -11,11 +11,11 @@ all: $(TARGETS)
 clean:
 	rm -f $(TARGETS)
 
-testcase = 03
+testcase = 01
 output = ans.txt
-NumofMach = 4
-Numofthreads = 28
-Num = 21
+NumofMach = 1
+Numofthreads = 4
+Num = 4
 get_test:
 	od -tfF testcases/$(testcase).in
 get_ans:
