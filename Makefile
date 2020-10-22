@@ -11,11 +11,11 @@ all: $(TARGETS)
 clean:
 	rm -f $(TARGETS)
 
-testcase = 33
+testcase = 01
 output = ans.txt
 NumofMach = 1
-Numofthreads = 12
-Num = 536869888
+Numofthreads = 4
+Num = 4
 get_test:
 	od -tfF testcases/$(testcase).in
 get_ans:
@@ -25,6 +25,7 @@ get_My:
 compare:
 	diff testcases/$(testcase).out $(output)
 run:
+	rm ans.txt
 	srun -N $(NumofMach) -n $(Numofthreads) ./hw1 $(Num) testcases/$(testcase).in $(output)
 recover:
 	cp ../../share/hw1/testcases/$(testcase).in testcases
