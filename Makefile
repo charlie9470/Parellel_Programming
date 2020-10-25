@@ -10,7 +10,23 @@ all: $(TARGETS)
 .PHONY: clean
 clean:
 	rm -f $(TARGETS)
+
+testcase = 38
+output = ans.txt
+NumofNode = 3
+Numofthreads = 12
+Num = 536831999
 get_test:
-	od -tfF ../testcases/03.in
+	od -tfF testcases/$(testcase).in
+get_ans:
+	od -tfF testcases/$(testcase).out
+get_My:
+	od -tfF $(output)
+compare:
+	diff testcases/$(testcase).out $(output)
 run:
-	srun -N 1 -n 6 ./hw1 21 ../testcases/03.in ans.txt
+	srun -N$(NumofNode) -n$(Numofthreads) ./hw1 $(Num) testcases/$(testcase).in $(output)
+recover:
+	cp ../../share/hw1/testcases/$(testcase).in testcases
+clean_job:
+	scancel -u pp20s53
