@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
 		}
 		else index_no_work = i+1;
 	}
-//	if(DEBUG_MODE)printf("rank %d: Index_no_work: %d\n", rank, index_no_work);
+	if(DEBUG_MODE)printf("rank %d: Index_no_work: %d\n", rank, index_no_work);
 	for(int i = 0;dist_num>0;i++){
 		if(i == size) i = 0;
 		send_cnt[i]++;
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
 		displs[i] = displs[i-1] + send_cnt[i-1];
 	}
 	if(DEBUG_MODE){
-	if(rank == size/2){
+	if(rank == size-1){
 		printf("send_cnt: ");
 		for(int i = 0;i<size;i++){
 			printf("%d,", send_cnt[i]);
@@ -113,350 +113,135 @@ int main(int argc, char** argv) {
 	Comm_time += (d_T-c_T);}
 	//
 	//
-	//
-	//
 	int odd_rank;
 	int even_rank;
-	int index_mid = recv_num/2;//First index of the second half of swapped
-	int num_recv_from_next,num_recv_from_prev;
-	int num_pass_to_next,num_pass_to_prev;
+	int recv_odd;
+	int recv_even;
 	if(rank%2){
 		odd_rank = rank - 1;
 		even_rank = rank + 1;
-		num_recv_from_next = send_cnt[even_rank]/2;
-		num_recv_from_prev = (send_cnt[odd_rank]%2)?send_cnt[odd_rank]/2+1:send_cnt[odd_rank]/2;
-		num_pass_to_prev = recv_num/2;
-		num_pass_to_next = recv_num - num_pass_to_prev;
-		if(DEBUG_MODE) printf("Rank %d: {from_prev,to_prev,to_next,from_next} = {%d,%d,%d,%d}\n", rank,num_recv_from_prev,num_pass_to_prev,num_pass_to_next,num_recv_from_next);
 	}
 	else{
 		odd_rank = rank + 1;
 		even_rank = rank - 1;
-		num_recv_from_next = send_cnt[odd_rank]/2;
-		num_recv_from_prev = (send_cnt[even_rank]%2)?send_cnt[even_rank]/2+1:send_cnt[even_rank]/2;
-		num_pass_to_prev = recv_num/2;
-		num_pass_to_next = recv_num - num_pass_to_prev;
-		if(DEBUG_MODE) printf("Rank %d: {from_prev,to_prev,to_next,from_next} = {%d,%d,%d,%d}\n", rank, num_recv_from_prev,num_pass_to_prev,num_pass_to_next,num_recv_from_next);
 	}
-//	MPI_Barrier(MPI_COMM_WORLD);
+	if(rank==index_no_work-1&&index_no_work%2)recv_odd = 0;
+	else recv_odd = send_cnt[odd_rank];
+	if(rank!=0)recv_even = send_cnt[even_rank];
+	MPI_Barrier(MPI_COMM_WORLD);
 	float *send_buf;
 	float *recv_buf;
 	float *NEW;
-	send_buf = (float*)malloc(sizeof(float)*(num_pass_to_next+10));
-	recv_buf = (float*)malloc(sizeof(float)*(max(num_recv_from_next,num_recv_from_prev)+10));
-	NEW = (float*)malloc(sizeof(float)*(num_pass_to_next + max(num_recv_from_next,num_recv_from_prev)+10));
+	send_buf = (float*)malloc(sizeof(float)*recv_num);
+	recv_buf = (float*)malloc(sizeof(float)*recv_num);
+	NEW = (float*)malloc(sizeof(float)*(2*recv_num+5));
 	
 	sort(swapped, swapped + recv_num);
+	if(DEBUG_MODE)printf("Local sort done\n");
+
 	while(1){
 		change = 0;
 		t_change = 0;
 		//Odd phase
-		MPI_Request send_req, recv_req;
 		MPI_Status status;
-		if(rank < index_no_work - 1 && rank % 2 == 0){
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d tries to commute with Rank %d\n", rank, odd_rank);
-			//Send the last num_pass_to_next elements to the next rank
-			for(int i = 0;i<num_pass_to_next;i++){
-				send_buf[i] = swapped[index_mid+i];
+		if(rank < index_no_work&&!(index_no_work%2&&rank==index_no_work-1)){
+			if(DEBUG_MODE) printf("Rank %d tries to commute with Rank %d\n", rank, odd_rank);
+			//Send all elements to odd rank
+			for(int i = 0;i<recv_num;i++){
+				send_buf[i] = swapped[i];
 			}
 			//Send and recv
 			if(PRINT_TIME) c_T = MPI_Wtime();
-			MPI_Sendrecv(send_buf, num_pass_to_next, MPI_FLOAT, odd_rank, 1, recv_buf, num_recv_from_next, MPI_FLOAT, odd_rank, 1, MPI_COMM_WORLD, &status);
+			MPI_Sendrecv(send_buf, recv_num, MPI_FLOAT, odd_rank, 1, recv_buf, recv_odd, MPI_FLOAT, odd_rank, 1, MPI_COMM_WORLD, &status);
 			if(PRINT_TIME){d_T = MPI_Wtime();
 			Comm_time += (d_T-c_T);}
-			sort(swapped, swapped + recv_num);
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 1\n", rank);
+			if(DEBUG_MODE) printf("Rank %d finished tag 1\n", rank);
 			//
-			//Sort the first num_pass_to_prev elements and the recv_buf
-			mergeArr(swapped, num_pass_to_prev, recv_buf, num_recv_from_next, NEW);
+			//sort the two arrays
+			mergeArr(swapped, recv_num, recv_buf, recv_odd, NEW);
 			//
-			//Put the first num_pass_to_prev elements back to swapped
-			for(int i = 0;i<num_pass_to_prev;i++){
-				if(NEW[i]!=swapped[i]){
-					swapped[i] = NEW[i];
-					change++;
+			//put the second array back
+			if(rank%2){
+				for(int i = 0;i<recv_num;i++){
+					if(swapped[i]!=NEW[i+recv_odd]){
+						swapped[i] = NEW[i+recv_odd];
+						change++;
+					}
 				}
 			}
 			//
-			//Send the last num_recv_from_next elements back to the next rank (Using recv_buf)
-			for(int i = 0;i<num_recv_from_next;i++){
-				recv_buf[i] = NEW[index_mid+i];
-			}
-			//
-			//Send and recv
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Sendrecv(recv_buf, num_recv_from_next, MPI_FLOAT, odd_rank, 2, send_buf, num_pass_to_next, MPI_FLOAT, odd_rank, 2, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 2\n", rank);
-			for(int i = 0;i<num_pass_to_next;i++){
-				if(swapped[i+index_mid]!=send_buf[i]){
-					swapped[i+index_mid] = send_buf[i];
-					change++;
+			//put the first array back
+			else{
+				for(int i = 0;i<recv_num;i++){
+					if(NEW[i]!=swapped[i]){
+						swapped[i] = NEW[i];
+						change++;
+					}
 				}
-			}
-			//
-			//Recv the first num_recv_from_next elements from the next rank
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Recv(recv_buf, num_recv_from_next, MPI_FLOAT, odd_rank, 3, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			//
-			//Sort the last num_pass_to_next elements and the recv_buf
-			mergeArr(swapped + index_mid, num_pass_to_next, recv_buf, num_recv_from_next, NEW);
-			//
-			//Put the last num_pass_to_next elements back(Sorted)
-			for(int i = 0;i < num_pass_to_next;i++){
-				if(swapped[i+index_mid]!=NEW[i]){
-					swapped[i+index_mid] = NEW[i];
-					change++;
-				}
-			}
-			//
-			//Send the first_num_recv_from_next elements back to the next rank
-			for(int i = 0;i < num_recv_from_next;i++){
-				send_buf[i] = NEW[i+num_pass_to_next];
-			}
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Send(send_buf, num_recv_from_next, MPI_FLOAT, odd_rank, 3, MPI_COMM_WORLD);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 3\n", rank);
+			}/*
 			if(DEBUG_MODE&&!DEBUG_HUGE_TESTCASE){
 				printf("Rank %d after odd sort\n",rank);
 				for(int i=0;i<recv_num;i++){
 					printf("%f,", swapped[i]);
 				}
 				printf("\n---------------------\n");
-			}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE){
-				printf("Rank %d done communicating with Rank %d\n", rank, odd_rank);
-			}
-		}
-		if(rank != 0 && rank < index_no_work&& rank % 2){
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d tries to commute with Rank %d\n", rank, odd_rank);
-			//
-			//Send the first num_pass_to_prev elements to the last rank
-			for(int i = 0;i<num_pass_to_prev;i++){
-				send_buf[i] = swapped[i];
-			}
-			//
-			//Send and recv
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Sendrecv(send_buf, num_pass_to_prev, MPI_FLOAT, odd_rank, 1, recv_buf, num_recv_from_prev, MPI_FLOAT, odd_rank, 1, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 1\n", rank);
-			//
-			//Sort the first num_recv_from_prev elements and the last num_pass_to_next elements
-			mergeArr(recv_buf, num_recv_from_prev, swapped + index_mid, num_pass_to_next, NEW);
-			//
-			//Put the last num_pass_to_next elements back
-			for(int i = 0;i<num_pass_to_next;i++){
-				if(swapped[i+index_mid]!=NEW[i+num_recv_from_prev]){
-					swapped[i+index_mid] = NEW[i+num_recv_from_prev];
-					change++;
-				}
-			}
-			//
-			//Send the first num_recv_from_prev elements back(Using recv_buf)
-			for(int i = 0;i<num_recv_from_prev;i++){
-				recv_buf[i] = NEW[i];
-			}
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Sendrecv(recv_buf, num_recv_from_prev, MPI_FLOAT, odd_rank, 2, send_buf, num_pass_to_prev, MPI_FLOAT, odd_rank, 2, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 2\n", rank);
-			//
-			//Put the first num_pass_to_prev elements back
-			for(int i = 0;i<num_pass_to_prev;i++){
-				if(swapped[i]!=send_buf[i]){
-					swapped[i] = send_buf[i];
-					change++;
-				}
-			}
-			//
-			//Send the first num_pass_to_prev elements to the last rank
-			for(int i = 0;i<num_pass_to_prev;i++){
-				send_buf[i] = swapped[i];
-			}
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Send(send_buf, num_pass_to_prev, MPI_FLOAT, odd_rank, 3, MPI_COMM_WORLD);
-			//
-			//Recv the first num_pass_to_prev elements from the last rank(Sorted)
-			MPI_Recv(recv_buf, num_pass_to_prev, MPI_FLOAT, odd_rank, 3, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 3\n", rank);
-			for(int i = 0;i<num_pass_to_prev;i++){
-				if(recv_buf[i]!=swapped[i]){
-					swapped[i] = recv_buf[i];
-					change++;
-				}
-			}
-			if(DEBUG_MODE&&!DEBUG_HUGE_TESTCASE){
-				printf("Rank %d after odd sort\n",rank);
-				for(int i=0;i<recv_num;i++){
-					printf("%f,", swapped[i]);
-				}
-				printf("\n---------------------\n");
-			}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE){
+			}*/
+			if(DEBUG_MODE){
 				printf("Rank %d done communicating with Rank %d\n", rank, odd_rank);
 			}
 		}
 
-//		MPI_Barrier(MPI_COMM_WORLD);
-		if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE&&rank == size-1) printf("odd phase done\n");
+		MPI_Barrier(MPI_COMM_WORLD);
+
+		if(DEBUG_MODE&&rank == size-1) printf("odd phase done\n");
 		//Even phase
-		if(rank != 0&& rank < index_no_work && rank % 2 == 0){
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d tries to commute with Rank %d\n", rank, even_rank);
+		if(rank != 0 && rank < index_no_work&&!(rank == index_no_work-1&&(index_no_work-1)%2)){
+			if(DEBUG_MODE) printf("Rank %d tries to commute with Rank %d\n", rank, even_rank);
 			//
-			//Send the first num_pass_to_prev elements to the last rank
-			for(int i = 0;i < num_pass_to_prev;i++){
+			//Send the array to Even rank
+			for(int i = 0;i < recv_num;i++){
 				send_buf[i] = swapped[i];
 			}
 
 			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Sendrecv(send_buf, num_pass_to_prev, MPI_FLOAT, even_rank, 1, recv_buf, num_recv_from_prev, MPI_FLOAT, even_rank, 1, MPI_COMM_WORLD, &status);
+			MPI_Sendrecv(send_buf, recv_num, MPI_FLOAT, even_rank, 1, recv_buf, recv_even, MPI_FLOAT, even_rank, 1, MPI_COMM_WORLD, &status);
 			if(PRINT_TIME){d_T = MPI_Wtime();
 			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 1\n", rank);
+			if(DEBUG_MODE) printf("Rank %d finished tag 1\n", rank);
 			//
-			//Sort the last num_pass_to_next elements and the recv_buf
-			mergeArr(swapped + index_mid, num_pass_to_next, recv_buf, num_recv_from_prev, NEW);
+			//Sort the two arrays
+			mergeArr(swapped, recv_num, recv_buf, recv_even, NEW);
 			//
-			//Put the last num_pass_to_next elements back
-			for(int i = 0;i < num_pass_to_next;i++){
-				if(swapped[i+index_mid]!=NEW[i+num_recv_from_prev]){
-					swapped[i+index_mid] = NEW[i+num_recv_from_prev];
-					change++;
+			//Put the first array back
+			if(rank%2){
+				for(int i = 0;i < recv_num;i++){
+					if(swapped[i]!=NEW[i]){
+						swapped[i] = NEW[i];
+						change++;
+					}
 				}
 			}
-			//
-			//Send the first num_recv_from_prev elements back to the last rank
-			for(int i = 0;i < num_recv_from_prev;i++){
-				recv_buf[i] = NEW[i];
-			}
-
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Sendrecv(recv_buf, num_recv_from_prev, MPI_FLOAT, even_rank, 2, send_buf, num_pass_to_prev, MPI_FLOAT, even_rank, 2, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 2\n", rank);
-			for(int i = 0;i<num_pass_to_prev;i++){
-				if(swapped[i]!=send_buf[i]){
-					swapped[i] = send_buf[i];
-					change++;
+			else{
+				for(int i = 0;i < recv_num;i++){
+					if(swapped[i]!=NEW[i+recv_even]){
+						swapped[i] = NEW[i+recv_even];
+						change++;
+					}
 				}
-			}
-			//
-			//Send the first num_pass_to_prev elements to the last rank
-			for(int i = 0;i<num_pass_to_prev;i++){
-				send_buf[i] = swapped[i];
-			}
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Send(send_buf, num_pass_to_prev, MPI_FLOAT, even_rank, 3, MPI_COMM_WORLD);
-			//
-			//Recv the first num_pass_to_prev elements from the last rank
-			MPI_Recv(recv_buf, num_pass_to_prev, MPI_FLOAT, even_rank, 3, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 3\n", rank);
-			for(int i = 0;i<num_pass_to_prev;i++){
-				if(swapped[i]!=recv_buf[i]){
-					swapped[i] = recv_buf[i];
-					change++;
-				}
-			}
+			}/*
 			if(DEBUG_MODE&&!DEBUG_HUGE_TESTCASE){
 				printf("Rank %d after even sort\n",rank);
 				for(int i=0;i<recv_num;i++){
 					printf("%f,", swapped[i]);
 				}
 				printf("\n---------------------\n");
-			}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE){
+			}*/
+			if(DEBUG_MODE){
 				printf("Rank %d done communicating with Rank %d\n", rank, even_rank);
 			}
 		}
-		if(rank != 0 && rank < index_no_work-1 && rank % 2){
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d tries to commute with Rank %d\n", rank, even_rank);
-			//Send the last num_pass_to_next elements to the next rank
-			for(int i = 0;i < num_pass_to_next;i++){
-				send_buf[i] = swapped[i+index_mid];
-			}
 
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Sendrecv(send_buf, num_pass_to_next, MPI_FLOAT, even_rank, 1, recv_buf, num_recv_from_next, MPI_FLOAT, even_rank, 1, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 1\n", rank);
-			//
-			//Sort the first num_pass_to_prev elements with the recv_buf
-			mergeArr(swapped, num_pass_to_prev, recv_buf, num_recv_from_next, NEW);
-			//
-			//Put the first num_pass_to_prev elements back
-			for(int i = 0;i < num_pass_to_prev;i++){
-				if(swapped[i]!=NEW[i]){
-					swapped[i] = NEW[i];
-					change++;
-				}
-			}
-			//
-			//Send the last num_recv_from_next elements back to the next rank(Using recv_buf)
-			for(int i = 0;i < num_recv_from_next;i++){
-				recv_buf[i] = NEW[i+index_mid];
-			}
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Sendrecv(recv_buf, num_recv_from_next, MPI_FLOAT, even_rank, 2, send_buf, num_pass_to_next, MPI_FLOAT, even_rank, 2, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 2\n", rank);
-			for(int i = 0;i < num_pass_to_next;i++){
-				if(swapped[i+index_mid]!=send_buf[i]){
-					swapped[i+index_mid] = send_buf[i];
-					change++;
-				}
-			}
-			//
-			//Recv the first num_recv_from_next elements from the next rank
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Recv(recv_buf, num_recv_from_next, MPI_FLOAT, even_rank, 3, MPI_COMM_WORLD,&status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			//
-			//Sort and put back the last num_pass_to_next and the recv_buf
-			mergeArr(swapped + index_mid, num_pass_to_next, recv_buf, num_recv_from_next, NEW);
-			for(int i = 0;i<num_pass_to_next;i++){
-				if(swapped[i+index_mid]!=NEW[i]){
-					swapped[i+index_mid] = NEW[i];
-					change++;
-				}
-			}
-			//
-			//Send the last num_recv_from_next elements back to the next rank
-			for(int i = 0;i<num_recv_from_next;i++){
-				send_buf[i] = NEW[i+num_pass_to_next];
-			}
-			if(PRINT_TIME)c_T = MPI_Wtime();
-			MPI_Send(send_buf, num_recv_from_next, MPI_FLOAT, even_rank, 3, MPI_COMM_WORLD);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE) printf("Rank %d finished tag 3\n", rank);
-			//
-			if(DEBUG_MODE&&!DEBUG_HUGE_TESTCASE){
-				printf("Rank %d after even sort\n",rank);
-				for(int i=0;i<recv_num;i++){
-					printf("%f,", swapped[i]);
-				}
-				printf("\n---------------------\n");
-			}
-			if(DEBUG_MODE&&DEBUG_HUGE_TESTCASE){
-				printf("Rank %d done communicating with Rank %d\n", rank, even_rank);
-			}
-		}
+		MPI_Barrier(MPI_COMM_WORLD);
 
 		if(PRINT_TIME)c_T = MPI_Wtime();
 		MPI_Allreduce(&change, &t_change, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
@@ -465,7 +250,6 @@ int main(int argc, char** argv) {
 		if(DEBUG_MODE && rank == size-1) printf("one round complete\n--------------------\n");
 //		if(DEBUG_MODE) t_change = 0;
 		if(t_change == 0) {
-			sort(swapped, swapped + recv_num);
 			if(PRINT_TIME) c_T = MPI_Wtime();
 			MPI_Gatherv(swapped, recv_num, MPI_FLOAT, ans, send_cnt, displs, MPI_FLOAT, 0, MPI_COMM_WORLD);
 			if(PRINT_TIME){d_T = MPI_Wtime();
@@ -484,8 +268,9 @@ int main(int argc, char** argv) {
 		}
 	}
 //	//printf("Sorted and stored in ans\n");
-	b_T = MPI_Wtime();
-	CPU_time = (b_T-a_T-Comm_time);
+	if(PRINT_TIME){b_T = MPI_Wtime();
+	CPU_time = (b_T-a_T-Comm_time);}
+	if(PRINT_TIME) a_T = MPI_Wtime();
 	MPI_File_close(&f);
 	MPI_File out_file;
 	int err = MPI_File_open(MPI_COMM_WORLD, argv[3], MPI_MODE_CREATE | MPI_MODE_EXCL | MPI_MODE_WRONLY, MPI_INFO_NULL, &out_file);
@@ -498,8 +283,11 @@ int main(int argc, char** argv) {
 		MPI_File_write(out_file, ans, num, MPI_FLOAT, MPI_STATUS_IGNORE);
 	}
 	MPI_File_close(&out_file);
+	if(PRINT_TIME){b_T = MPI_Wtime();
+	IO_time+=(b_T-a_T);}
 	if(PRINT_TIME) E_time = MPI_Wtime();
 	if(PRINT_TIME){
+		MPI_File_open(MPI_COMM_WORLD, argv[4], MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &f);
 		MPI_Reduce(&CPU_time, &R_CPU_time, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
 		MPI_Reduce(&Comm_time, &R_Comm_time, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
 		MPI_Reduce(&IO_time, &R_IO_time, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -507,9 +295,15 @@ int main(int argc, char** argv) {
 		R_Comm_time/= size;
 		R_IO_time/= size;
 		if(rank == 0){
+			char Write_BUF[100];/*
 			printf("CPU time: %f\n",CPU_time);
 			printf("Comm time: %f\n",Comm_time);
-			printf("IO time: %f\n",IO_time);
+			printf("IO time: %f\n",IO_time);*/
+			int writesize = sizeof("CPU time: \nComm time: \nIO time: \n")+3*sizeof(float);
+			sprintf(Write_BUF,"CPU time: %.2f\nComm time: %.2f\nIO time: %.2f\n", R_CPU_time, R_Comm_time, R_IO_time);
+			printf("%s,sizeof: {%d,%d}\n",Write_BUF,sizeof(Write_BUF),writesize);
+			MPI_File_write(f, Write_BUF, writesize, MPI_CHAR, MPI_STATUS_IGNORE);
+			MPI_File_close(&f);
 		}
 	}
 	if(PRINT_TIME&&rank == 0) printf("The task took %f\n",E_time - S_time);
