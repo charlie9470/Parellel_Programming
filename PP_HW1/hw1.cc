@@ -4,7 +4,6 @@
 #include <mpi.h>
 #include <algorithm>
 #define DEBUG_MODE 0
-#define PRINT_TIME 1
 #define DEBUG_HUGE_TESTCASE 1
 #define DETAIL_MODE 0
 using namespace std;
@@ -44,22 +43,14 @@ int main(int argc, char** argv) {
 	int change = 0;
 	int t_change;
 	float *swapped;
-	double S_time, E_time, Sort_time, a_T, b_T, c_T, d_T;
-	double IO_time = 0, CPU_time = 0, Comm_time = 0;
-	double R_IO_time = 0, R_CPU_time = 0, R_Comm_time = 0;
-	if(PRINT_TIME) S_time = MPI_Wtime();
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 
 
-	if(PRINT_TIME)a_T = MPI_Wtime();
 	MPI_File f;
 	MPI_File_open(MPI_COMM_WORLD, argv[2], MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
 	MPI_File_read_all(f, ans, num, MPI_FLOAT, MPI_STATUS_IGNORE);
 	MPI_File_close(&f);
-	if(PRINT_TIME){b_T = MPI_Wtime();
-	IO_time += (b_T-a_T);}
-	if(PRINT_TIME)a_T = MPI_Wtime();
 	int *send_cnt;
 	int *displs;
 	int index_no_work = 0;
@@ -107,10 +98,7 @@ int main(int argc, char** argv) {
 	}
 	int recv_num = send_cnt[rank];
 	swapped = (float*)malloc(sizeof(float) * recv_num);
-	if(PRINT_TIME)c_T = MPI_Wtime();
 	MPI_Scatterv(ans, send_cnt, displs, MPI_FLOAT, swapped, recv_num, MPI_FLOAT, 0, MPI_COMM_WORLD);
-	if(PRINT_TIME){d_T = MPI_Wtime();
-	Comm_time += (d_T-c_T);}
 	//
 	//
 	int odd_rank;
@@ -151,10 +139,7 @@ int main(int argc, char** argv) {
 				send_buf[i] = swapped[i];
 			}
 			//Send and recv
-			if(PRINT_TIME) c_T = MPI_Wtime();
 			MPI_Sendrecv(send_buf, recv_num, MPI_FLOAT, odd_rank, 1, recv_buf, recv_odd, MPI_FLOAT, odd_rank, 1, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
 			if(DEBUG_MODE) printf("Rank %d finished tag 1\n", rank);
 			//
 			//sort the two arrays
@@ -203,10 +188,7 @@ int main(int argc, char** argv) {
 				send_buf[i] = swapped[i];
 			}
 
-			if(PRINT_TIME)c_T = MPI_Wtime();
 			MPI_Sendrecv(send_buf, recv_num, MPI_FLOAT, even_rank, 1, recv_buf, recv_even, MPI_FLOAT, even_rank, 1, MPI_COMM_WORLD, &status);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
 			if(DEBUG_MODE) printf("Rank %d finished tag 1\n", rank);
 			//
 			//Sort the two arrays
@@ -243,17 +225,11 @@ int main(int argc, char** argv) {
 
 		MPI_Barrier(MPI_COMM_WORLD);
 
-		if(PRINT_TIME)c_T = MPI_Wtime();
 		MPI_Allreduce(&change, &t_change, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-		if(PRINT_TIME){d_T = MPI_Wtime();
-		Comm_time += (d_T-c_T);}
 		if(DEBUG_MODE && rank == size-1) printf("one round complete\n--------------------\n");
 //		if(DEBUG_MODE) t_change = 0;
 		if(t_change == 0) {
-			if(PRINT_TIME) c_T = MPI_Wtime();
 			MPI_Gatherv(swapped, recv_num, MPI_FLOAT, ans, send_cnt, displs, MPI_FLOAT, 0, MPI_COMM_WORLD);
-			if(PRINT_TIME){d_T = MPI_Wtime();
-			Comm_time += (d_T-c_T);}
 			if(DEBUG_MODE&&!DEBUG_HUGE_TESTCASE){
 				if(rank == 0){
 					printf("ANS:----------------------------------\n");
@@ -268,9 +244,6 @@ int main(int argc, char** argv) {
 		}
 	}
 //	//printf("Sorted and stored in ans\n");
-	if(PRINT_TIME){b_T = MPI_Wtime();
-	CPU_time = (b_T-a_T-Comm_time);}
-	if(PRINT_TIME) a_T = MPI_Wtime();
 	MPI_File_close(&f);
 	MPI_File out_file;
 	int err = MPI_File_open(MPI_COMM_WORLD, argv[3], MPI_MODE_CREATE | MPI_MODE_EXCL | MPI_MODE_WRONLY, MPI_INFO_NULL, &out_file);
@@ -283,30 +256,6 @@ int main(int argc, char** argv) {
 		MPI_File_write(out_file, ans, num, MPI_FLOAT, MPI_STATUS_IGNORE);
 	}
 	MPI_File_close(&out_file);
-	if(PRINT_TIME){b_T = MPI_Wtime();
-	IO_time+=(b_T-a_T);}
-	if(PRINT_TIME) E_time = MPI_Wtime();
-	if(PRINT_TIME){
-		MPI_File_open(MPI_COMM_WORLD, argv[4], MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &f);
-		MPI_Reduce(&CPU_time, &R_CPU_time, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&Comm_time, &R_Comm_time, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&IO_time, &R_IO_time, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-		R_CPU_time/= size;
-		R_Comm_time/= size;
-		R_IO_time/= size;
-		if(rank == 0){
-			char Write_BUF[100];/*
-			printf("CPU time: %f\n",CPU_time);
-			printf("Comm time: %f\n",Comm_time);
-			printf("IO time: %f\n",IO_time);*/
-			int writesize = sizeof("CPU time: \nComm time: \nIO time: \n")+3*sizeof(float);
-			sprintf(Write_BUF,"CPU time: %.2f\nComm time: %.2f\nIO time: %.2f\n", R_CPU_time, R_Comm_time, R_IO_time);
-			printf("%s,sizeof: {%d,%d}\n",Write_BUF,sizeof(Write_BUF),writesize);
-			MPI_File_write(f, Write_BUF, writesize, MPI_CHAR, MPI_STATUS_IGNORE);
-			MPI_File_close(&f);
-		}
-	}
-	if(PRINT_TIME&&rank == 0) printf("The task took %f\n",E_time - S_time);
 	MPI_Finalize();
 
 	return 0;
